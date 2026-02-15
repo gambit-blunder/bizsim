@@ -39,7 +39,7 @@ def auto_purchase_all(state: GameState) -> list[PurchaseResult]:
     for comp_id, comp in state.components.items():
         if not comp.auto_purchase_unlocked:
             continue
-        if comp.inventory < config.AUTO_PURCHASE_THRESHOLD:
-            result = purchase_component(state, comp_id, config.AUTO_PURCHASE_QUANTITY)
+        if comp.inventory < comp.auto_purchase_max_inventory:
+            result = purchase_component(state, comp_id, comp.auto_purchase_quantity)
             results.append(result)
     return results

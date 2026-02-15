@@ -4,16 +4,18 @@ Flask application — thin web layer over the engine.
 Handles:
   - Serving the UI
   - JSON API for AJAX polling (no more full-page refresh)
-  - Player action routes (upgrades, purchases, price changes)
+  - Player action routes (all return JSON, no redirects)
   - Background tick thread
+  - Action logging
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import numpy as np
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, jsonify
 
 from engine.game_state import GameState
 from engine.tick import run_tick, precompute_growth_factors
@@ -21,6 +23,13 @@ from engine.upgrades import upgrade_throughput, upgrade_efficiency, unlock_auto_
 from engine.purchasing import purchase_component
 from engine.clock import format_date
 from engine import config
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("bizsim.server")
 
 app = Flask(__name__)
 
@@ -41,7 +50,6 @@ def tick_loop():
             if game.game_over:
                 break
 
-            # Recompute growth factors at the start of each new year
             current_year = game.game_year
             result = run_tick(game, growth_factors)
             last_tick_result = result
@@ -50,6 +58,13 @@ def tick_loop():
                 growth_factors = precompute_growth_factors(game, rng)
 
         time.sleep(config.TICK_SECONDS)
+
+
+# ── Helper ────────────────────────────────────────────────────────────────────
+
+def get_data():
+    """Parse request body as JSON or fall back to form data."""
+    return request.get_json(silent=True) or request.form
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -76,9 +91,9 @@ def api_state():
                 "efficiency_multiplier": round(factory.efficiency_multiplier, 4),
                 "throughput_upgrade_cost": round(calculate_upgrade_cost(factory.throughput_level), 0),
                 "efficiency_upgrade_cost": round(calculate_upgrade_cost(factory.efficiency_level), 0),
+                "paused": factory.paused,
             }
 
-            # Add last tick sales data if available
             if last_tick_result:
                 for s in last_tick_result.sales:
                     if s.product_id == pid:
@@ -93,9 +108,10 @@ def api_state():
                 "price": comp.price,
                 "inventory": round(comp.inventory, 1),
                 "auto_purchase_unlocked": comp.auto_purchase_unlocked,
+                "auto_purchase_quantity": comp.auto_purchase_quantity,
+                "auto_purchase_max_inventory": comp.auto_purchase_max_inventory,
             }
 
-        # Adjusted BOM for display
         bom_display = {}
         for pid in game.products:
             bom_display[pid] = {}
@@ -120,48 +136,90 @@ def api_state():
         })
 
 
-# ── Player actions ────────────────────────────────────────────────────────────
+# ── Player actions (all return JSON, no redirects) ───────────────────────────
 
 @app.route("/action/upgrade_throughput", methods=["POST"])
 def action_upgrade_throughput():
-    pid = request.form["product_id"]
+    data = get_data()
+    pid = data["product_id"]
     with tick_lock:
-        upgrade_throughput(game, pid)
-    return redirect(url_for("index"))
+        success = upgrade_throughput(game, pid)
+    logger.info("upgrade_throughput product=%s success=%s", pid, success)
+    return jsonify({"success": success, "action": "upgrade_throughput", "product_id": pid})
 
 
 @app.route("/action/upgrade_efficiency", methods=["POST"])
 def action_upgrade_efficiency():
-    pid = request.form["product_id"]
+    data = get_data()
+    pid = data["product_id"]
     with tick_lock:
-        upgrade_efficiency(game, pid)
-    return redirect(url_for("index"))
+        success = upgrade_efficiency(game, pid)
+    logger.info("upgrade_efficiency product=%s success=%s", pid, success)
+    return jsonify({"success": success, "action": "upgrade_efficiency", "product_id": pid})
 
 
 @app.route("/action/set_price", methods=["POST"])
 def action_set_price():
-    pid = request.form["product_id"]
-    new_price = float(request.form["price"])
+    data = get_data()
+    pid = data["product_id"]
+    new_price = float(data["price"])
     with tick_lock:
+        old_price = game.products[pid].price
         game.products[pid].price = max(0.0, round(new_price, 2))
-    return redirect(url_for("index"))
+    logger.info("set_price product=%s old=%.2f new=%.2f", pid, old_price, game.products[pid].price)
+    return jsonify({"success": True, "action": "set_price", "product_id": pid, "new_price": game.products[pid].price})
 
 
 @app.route("/action/purchase_component", methods=["POST"])
 def action_purchase_component():
-    cid = int(request.form["component_id"])
-    qty = int(request.form["quantity"])
+    data = get_data()
+    cid = int(data["component_id"])
+    qty = int(data["quantity"])
     with tick_lock:
-        purchase_component(game, cid, qty)
-    return redirect(url_for("index"))
+        result = purchase_component(game, cid, qty)
+    logger.info("purchase_component comp=%d qty=%d success=%s reason=%s", cid, qty, result.success, result.reason)
+    return jsonify({"success": result.success, "action": "purchase_component", "component_id": cid, "quantity": qty, "reason": result.reason})
 
 
 @app.route("/action/unlock_auto_purchase", methods=["POST"])
 def action_unlock_auto_purchase():
-    cid = int(request.form["component_id"])
+    data = get_data()
+    cid = int(data["component_id"])
     with tick_lock:
-        unlock_auto_purchase(game, cid)
-    return redirect(url_for("index"))
+        success = unlock_auto_purchase(game, cid)
+    logger.info("unlock_auto_purchase comp=%d success=%s", cid, success)
+    return jsonify({"success": success, "action": "unlock_auto_purchase", "component_id": cid})
+
+
+@app.route("/action/toggle_pause", methods=["POST"])
+def action_toggle_pause():
+    data = get_data()
+    pid = data["product_id"]
+    with tick_lock:
+        factory = game.factories[pid]
+        factory.paused = not factory.paused
+    logger.info("toggle_pause product=%s paused=%s", pid, factory.paused)
+    return jsonify({"success": True, "action": "toggle_pause", "product_id": pid, "paused": factory.paused})
+
+
+@app.route("/action/set_auto_purchase", methods=["POST"])
+def action_set_auto_purchase():
+    data = get_data()
+    cid = int(data["component_id"])
+    with tick_lock:
+        comp = game.components[cid]
+        if "quantity" in data and data["quantity"] is not None:
+            comp.auto_purchase_quantity = max(1, int(data["quantity"]))
+        if "max_inventory" in data and data["max_inventory"] is not None:
+            comp.auto_purchase_max_inventory = max(0, int(data["max_inventory"]))
+    logger.info("set_auto_purchase comp=%d qty=%d max_inv=%d", cid, comp.auto_purchase_quantity, comp.auto_purchase_max_inventory)
+    return jsonify({
+        "success": True,
+        "action": "set_auto_purchase",
+        "component_id": cid,
+        "auto_purchase_quantity": comp.auto_purchase_quantity,
+        "auto_purchase_max_inventory": comp.auto_purchase_max_inventory,
+    })
 
 
 @app.route("/action/new_game", methods=["POST"])
@@ -172,7 +230,8 @@ def action_new_game():
         rng = np.random.default_rng(42)
         growth_factors = precompute_growth_factors(game, rng)
         last_tick_result = None
-    return redirect(url_for("index"))
+    logger.info("new_game started")
+    return jsonify({"success": True, "action": "new_game"})
 
 
 # ── Start ─────────────────────────────────────────────────────────────────────

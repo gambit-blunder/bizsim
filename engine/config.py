@@ -142,5 +142,4 @@ EFFICIENCY_REDUCTION_PER_LEVEL = 0.20  # 20% component savings per level
 
 # ── Auto-Purchase ────────────────────────────────────────────────────────────
 AUTO_PURCHASE_UNLOCK_COST = 2_000
-AUTO_PURCHASE_THRESHOLD = 1_000     # Reorder point
-AUTO_PURCHASE_QUANTITY = 100        # Units per auto-buy
+# Per-component defaults for quantity and max_inventory are on ComponentState

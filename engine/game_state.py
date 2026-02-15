@@ -16,6 +16,7 @@ from engine import config
 class FactoryState:
     throughput_level: int = 0
     efficiency_level: int = 0
+    paused: bool = False
 
     @property
     def capacity(self) -> int:
@@ -40,6 +41,8 @@ class ComponentState:
     price: float = 1.0
     inventory: float = 0.0
     auto_purchase_unlocked: bool = False
+    auto_purchase_quantity: int = 100       # units per auto-buy
+    auto_purchase_max_inventory: int = 1000 # reorder when below this level
 
 
 @dataclass

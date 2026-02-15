@@ -89,6 +89,9 @@
         }
         button.buy-btn { background: #059669; }
         button.buy-btn:hover { background: #10b981; }
+        button.pause-btn { background: #059669; padding: 4px 10px; }
+        button.pause-btn.paused { background: #dc2626; }
+        button.pause-btn.paused:hover { background: #ef4444; }
 
         .price-control {
             display: flex;
@@ -96,7 +99,7 @@
             justify-content: center;
             gap: 4px;
         }
-        .price-control input {
+        .price-control input, .auto-input {
             width: 65px;
             padding: 4px 6px;
             text-align: center;
@@ -106,13 +109,13 @@
             border-radius: 4px;
             font-size: 0.9em;
         }
+        .auto-input { width: 75px; }
         .price-control button {
             padding: 4px 8px;
             min-width: 28px;
         }
 
         .stat { color: #a0a0b0; font-size: 0.85em; }
-        .stat-value { color: #e0e0e0; font-weight: 600; }
         .revenue { color: #4ade80; }
         .demand-info { color: #fbbf24; font-size: 0.85em; }
 
@@ -124,7 +127,23 @@
             font-weight: 600;
         }
         .badge-active { background: #064e3b; color: #34d399; }
-        .badge-inactive { background: #1e1e2e; color: #6b7280; }
+
+        tr.row-paused td { opacity: 0.5; }
+        tr.row-paused td:nth-child(2) { opacity: 1; }
+
+        /* Activity Log */
+        .log-container {
+            max-height: 180px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.82em;
+            line-height: 1.6;
+        }
+        .log-entry { padding: 1px 4px; border-bottom: 1px solid #1e2130; }
+        .log-entry.success { color: #4ade80; }
+        .log-entry.fail { color: #f87171; }
+        .log-entry.info { color: #a0a0b0; }
+        .log-ts { color: #6b7280; margin-right: 6px; }
 
         .game-over-overlay {
             display: none;
@@ -166,6 +185,7 @@
                 <thead>
                     <tr>
                         <th>Product</th>
+                        <th>Status</th>
                         <th>Throughput</th>
                         <th>Efficiency</th>
                         <th>Capacity</th>
@@ -191,6 +211,8 @@
                         <th>Inventory</th>
                         <th>Purchase</th>
                         <th>Auto-Buy</th>
+                        <th>Auto Qty</th>
+                        <th>Max Inv</th>
                     </tr>
                 </thead>
                 <tbody id="components-table"></tbody>
@@ -211,6 +233,12 @@
             </table>
         </div>
 
+        <!-- Activity Log -->
+        <div class="card grid-full">
+            <h2>Activity Log</h2>
+            <div class="log-container" id="activity-log"></div>
+        </div>
+
     </div>
 
     <!-- Game Over overlay -->
@@ -219,14 +247,12 @@
             <h2>Game Over</h2>
             <p class="stat">Final Cash Balance</p>
             <div class="final-cash">$<span id="final-cash">0</span></div>
-            <form method="POST" action="/action/new_game">
-                <button type="submit">New Game</button>
-            </form>
+            <button onclick="gameAction('/action/new_game', {}).then(() => { document.getElementById('game-over').classList.remove('show'); })">New Game</button>
         </div>
     </div>
 
     <script>
-        // Poll the API every second for state updates
+        // ── Formatting helpers ───────────────────────────────────────────────
         function formatNumber(n) {
             return n.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         }
@@ -234,91 +260,165 @@
             return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         }
 
+        // ── Activity Log ─────────────────────────────────────────────────────
+        const MAX_LOG = 50;
+        const logEntries = [];
+
+        function addLog(message, type = 'info') {
+            const ts = new Date().toLocaleTimeString();
+            logEntries.unshift({ ts, message, type });
+            if (logEntries.length > MAX_LOG) logEntries.pop();
+            renderLog();
+        }
+
+        function renderLog() {
+            const el = document.getElementById('activity-log');
+            el.innerHTML = logEntries.map(e =>
+                `<div class="log-entry ${e.type}"><span class="log-ts">${e.ts}</span>${e.message}</div>`
+            ).join('');
+        }
+
+        // ── AJAX action helper ───────────────────────────────────────────────
+        async function gameAction(url, body) {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const result = await resp.json();
+                const name = result.action || url.split('/').pop();
+                if (result.success) {
+                    addLog(`${name}: OK`, 'success');
+                } else {
+                    addLog(`${name}: Failed — ${result.reason || 'insufficient funds'}`, 'fail');
+                }
+                poll(); // immediate refresh
+                return result;
+            } catch (e) {
+                addLog(`Error: ${e.message}`, 'fail');
+                console.error('Action error:', e);
+            }
+        }
+
+        // ── Focus-safe value setter ──────────────────────────────────────────
+        function safeSetValue(id, value) {
+            const el = document.getElementById(id);
+            if (el && document.activeElement !== el) {
+                el.value = value;
+            }
+        }
+
+        // ── UI Update ────────────────────────────────────────────────────────
         function updateUI(data) {
-            // Header
             document.getElementById('cash').textContent = formatCash(data.cash);
             document.getElementById('game-date').textContent = data.game_date;
 
-            // Game over check
             if (data.game_over) {
                 document.getElementById('game-over').classList.add('show');
                 document.getElementById('final-cash').textContent = formatCash(data.cash);
                 return;
             }
 
-            // Products table
+            // ── Products table ───────────────────────────────────────────────
             let prodHTML = '';
             for (const [pid, p] of Object.entries(data.products)) {
                 const sold = p.last_sold !== undefined ? p.last_sold : 0;
                 const demand = p.last_demand !== undefined ? Math.round(p.last_demand) : 0;
                 const rev = p.last_revenue !== undefined ? p.last_revenue : 0;
+                const pausedClass = p.paused ? 'row-paused' : '';
 
-                prodHTML += `<tr>
+                prodHTML += `<tr class="${pausedClass}">
                     <td><strong>${pid}</strong></td>
+                    <td>
+                        <button class="pause-btn ${p.paused ? 'paused' : ''}"
+                            onclick="gameAction('/action/toggle_pause', {product_id:'${pid}'})">
+                            ${p.paused ? 'Paused' : 'Running'}
+                        </button>
+                    </td>
                     <td>${p.throughput_level}</td>
                     <td>${p.efficiency_level}</td>
                     <td>${p.capacity}/day</td>
                     <td>${formatNumber(p.inventory)}</td>
                     <td>
                         <div class="price-control">
-                            <form method="POST" action="/action/set_price" style="display:flex;gap:4px;align-items:center;">
-                                <input type="hidden" name="product_id" value="${pid}">
-                                <button type="submit" onclick="this.form.price.value=(parseFloat(this.form.price.value)-0.5).toFixed(2);return true">-</button>
-                                <input type="number" name="price" value="${p.price.toFixed(2)}" step="0.1" min="0">
-                                <button type="submit" onclick="this.form.price.value=(parseFloat(this.form.price.value)+0.5).toFixed(2);return true">+</button>
-                            </form>
+                            <button onclick="gameAction('/action/set_price', {product_id:'${pid}', price:${(p.price - 0.5).toFixed(2)}})">-</button>
+                            <input type="number" id="price-${pid}" value="${p.price.toFixed(2)}" step="0.1" min="0"
+                                onchange="gameAction('/action/set_price', {product_id:'${pid}', price:parseFloat(this.value)})">
+                            <button onclick="gameAction('/action/set_price', {product_id:'${pid}', price:${(p.price + 0.5).toFixed(2)}})">+</button>
                         </div>
                     </td>
                     <td class="demand-info">${demand} / ${sold}</td>
                     <td class="revenue">$${formatCash(rev)}</td>
                     <td>
-                        <form method="POST" action="/action/upgrade_throughput" style="display:inline">
-                            <input type="hidden" name="product_id" value="${pid}">
-                            <button type="submit" ${data.cash < p.throughput_upgrade_cost ? 'disabled' : ''}>
-                                T+1 $${formatNumber(p.throughput_upgrade_cost)}
-                            </button>
-                        </form>
-                        <form method="POST" action="/action/upgrade_efficiency" style="display:inline">
-                            <input type="hidden" name="product_id" value="${pid}">
-                            <button type="submit" ${data.cash < p.efficiency_upgrade_cost ? 'disabled' : ''}>
-                                E+1 $${formatNumber(p.efficiency_upgrade_cost)}
-                            </button>
-                        </form>
+                        <button onclick="gameAction('/action/upgrade_throughput', {product_id:'${pid}'})"
+                            ${data.cash < p.throughput_upgrade_cost ? 'disabled' : ''}>
+                            T+1 $${formatNumber(p.throughput_upgrade_cost)}
+                        </button>
+                        <button onclick="gameAction('/action/upgrade_efficiency', {product_id:'${pid}'})"
+                            ${data.cash < p.efficiency_upgrade_cost ? 'disabled' : ''}>
+                            E+1 $${formatNumber(p.efficiency_upgrade_cost)}
+                        </button>
                     </td>
                 </tr>`;
             }
             document.getElementById('products-table').innerHTML = prodHTML;
 
-            // Components table
+            // Restore price input values without stealing focus
+            for (const [pid, p] of Object.entries(data.products)) {
+                safeSetValue(`price-${pid}`, p.price.toFixed(2));
+            }
+
+            // ── Components table ─────────────────────────────────────────────
             let compHTML = '';
             for (const [cid, c] of Object.entries(data.components)) {
-                const autoLabel = c.auto_purchase_unlocked
-                    ? '<span class="badge badge-active">Active</span>'
-                    : `<form method="POST" action="/action/unlock_auto_purchase" style="display:inline">
-                        <input type="hidden" name="component_id" value="${cid}">
-                        <button type="submit" ${data.cash < data.auto_purchase_unlock_cost ? 'disabled' : ''}>
-                            Hire $${formatNumber(data.auto_purchase_unlock_cost)}
-                        </button>
-                       </form>`;
+                let autoCell;
+                if (c.auto_purchase_unlocked) {
+                    autoCell = '<span class="badge badge-active">Active</span>';
+                } else {
+                    autoCell = `<button onclick="gameAction('/action/unlock_auto_purchase', {component_id:${cid}})"
+                        ${data.cash < data.auto_purchase_unlock_cost ? 'disabled' : ''}>
+                        Hire $${formatNumber(data.auto_purchase_unlock_cost)}
+                    </button>`;
+                }
+
+                const autoQty = c.auto_purchase_unlocked
+                    ? `<input type="number" class="auto-input" id="auto-qty-${cid}" value="${c.auto_purchase_quantity}"
+                        min="1" step="10"
+                        onchange="gameAction('/action/set_auto_purchase', {component_id:${cid}, quantity:parseInt(this.value)})">`
+                    : '-';
+
+                const autoMax = c.auto_purchase_unlocked
+                    ? `<input type="number" class="auto-input" id="auto-max-${cid}" value="${c.auto_purchase_max_inventory}"
+                        min="0" step="100"
+                        onchange="gameAction('/action/set_auto_purchase', {component_id:${cid}, max_inventory:parseInt(this.value)})">`
+                    : '-';
 
                 compHTML += `<tr>
                     <td>${cid}</td>
                     <td>$${c.price.toFixed(2)}</td>
                     <td>${formatNumber(Math.floor(c.inventory))}</td>
                     <td>
-                        <form method="POST" action="/action/purchase_component" style="display:inline">
-                            <input type="hidden" name="component_id" value="${cid}">
-                            <button class="buy-btn" type="submit" name="quantity" value="10">10</button>
-                            <button class="buy-btn" type="submit" name="quantity" value="100">100</button>
-                            <button class="buy-btn" type="submit" name="quantity" value="1000">1k</button>
-                        </form>
+                        <button class="buy-btn" onclick="gameAction('/action/purchase_component', {component_id:${cid}, quantity:10})">10</button>
+                        <button class="buy-btn" onclick="gameAction('/action/purchase_component', {component_id:${cid}, quantity:100})">100</button>
+                        <button class="buy-btn" onclick="gameAction('/action/purchase_component', {component_id:${cid}, quantity:1000})">1k</button>
                     </td>
-                    <td>${autoLabel}</td>
+                    <td>${autoCell}</td>
+                    <td>${autoQty}</td>
+                    <td>${autoMax}</td>
                 </tr>`;
             }
             document.getElementById('components-table').innerHTML = compHTML;
 
-            // BOM table
+            // Restore auto-purchase input values without stealing focus
+            for (const [cid, c] of Object.entries(data.components)) {
+                if (c.auto_purchase_unlocked) {
+                    safeSetValue(`auto-qty-${cid}`, c.auto_purchase_quantity);
+                    safeSetValue(`auto-max-${cid}`, c.auto_purchase_max_inventory);
+                }
+            }
+
+            // ── BOM table ────────────────────────────────────────────────────
             let bomHTML = '';
             const products = ['A', 'B', 'C', 'D', 'E'];
             for (let cid = 1; cid <= 5; cid++) {
@@ -332,7 +432,7 @@
             document.getElementById('bom-table').innerHTML = bomHTML;
         }
 
-        // Poll every second
+        // ── Polling ──────────────────────────────────────────────────────────
         async function poll() {
             try {
                 const resp = await fetch('/api/state');
@@ -344,7 +444,7 @@
         }
 
         setInterval(poll, 1000);
-        poll(); // initial load
+        poll();
     </script>
 </body>
 </html>

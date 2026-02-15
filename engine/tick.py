@@ -8,8 +8,11 @@ on a timer.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from engine.game_state import GameState
+
+logger = logging.getLogger("bizsim.tick")
 from engine.production import produce_all, ProductionResult
 from engine.sales import sell_all, SaleResult
 from engine.purchasing import auto_purchase_all, PurchaseResult
@@ -69,5 +72,14 @@ def run_tick(
 
     # 4. Advance clock
     state.game_day += 1
+
+    logger.debug(
+        "tick day=%d produced=%d sold=%d revenue=%.2f cash=%.2f",
+        state.game_day,
+        sum(p.units_produced for p in result.production),
+        result.total_units_sold,
+        result.total_revenue,
+        state.cash,
+    )
 
     return result

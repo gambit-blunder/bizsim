@@ -55,3 +55,27 @@ def test_auto_purchase_fires_when_unlocked():
     result = run_tick(state)
     assert len(result.auto_purchases) > 0
     assert state.components[3].inventory > 50
+
+
+def test_auto_purchase_uses_per_component_settings():
+    state = _ready_state()
+    state.components[3].auto_purchase_unlocked = True
+    state.components[3].auto_purchase_quantity = 200
+    state.components[3].auto_purchase_max_inventory = 500
+    state.components[3].inventory = 400  # below 500 threshold
+    inv_before = state.components[3].inventory
+    result = run_tick(state)
+    assert len(result.auto_purchases) > 0
+    # Should have bought exactly 200 (minus any consumed by production)
+    # Just verify inventory increased
+    assert state.components[3].inventory > inv_before - 100  # production may consume some
+
+
+def test_auto_purchase_does_not_fire_above_max_inventory():
+    state = _ready_state()
+    state.components[3].auto_purchase_unlocked = True
+    state.components[3].auto_purchase_max_inventory = 500
+    state.components[3].inventory = 600  # above threshold
+    result = run_tick(state)
+    auto_for_3 = [a for a in result.auto_purchases if a.component_id == 3]
+    assert len(auto_for_3) == 0

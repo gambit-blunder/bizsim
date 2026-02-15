@@ -69,3 +69,20 @@ def test_efficiency_reduces_component_usage():
     # used should be 2.1 * 0.64 * 10 = 13.44
     expected = 2.1 * (0.8 ** 2) * 10
     assert abs(used - expected) < 0.01
+
+
+def test_produce_nothing_when_paused():
+    state = _setup_state()
+    state.factories["A"].paused = True
+    result = produce(state, "A")
+    assert result.units_produced == 0
+    assert result.limited_by == "paused"
+
+
+def test_produce_resumes_after_unpause():
+    state = _setup_state()
+    state.factories["A"].paused = True
+    produce(state, "A")
+    state.factories["A"].paused = False
+    result = produce(state, "A")
+    assert result.units_produced > 0

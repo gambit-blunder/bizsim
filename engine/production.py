@@ -56,6 +56,8 @@ def produce(state: GameState, product_id: str) -> ProductionResult:
     factory = state.factories[product_id]
     if factory.throughput_level == 0:
         return ProductionResult(product_id, 0, {}, "no_factory")
+    if factory.paused:
+        return ProductionResult(product_id, 0, {}, "paused")
 
     max_units, limiter = calculate_max_producible(state, product_id)
     units = max_units  # produce as many as possible up to capacity
