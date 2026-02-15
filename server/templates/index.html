@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizSim - Marketplace Simulation</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #1a1d27;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #2a2d3a;
+        }
+        .header h1 { font-size: 1.4em; color: #7eb8ff; }
+        .header .cash { font-size: 1.6em; color: #4ade80; font-weight: bold; }
+        .header .date { font-size: 1.1em; color: #a0a0b0; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .grid-full { grid-column: 1 / -1; }
+
+        .card {
+            background: #1a1d27;
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid #2a2d3a;
+        }
+        .card h2 {
+            font-size: 1.1em;
+            color: #7eb8ff;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a2d3a;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+        th {
+            background: #242736;
+            color: #a0a0b0;
+            padding: 8px 10px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            padding: 8px 10px;
+            text-align: center;
+            border-bottom: 1px solid #1e2130;
+        }
+        tr:hover td { background: #1e2130; }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.2s;
+        }
+        button:hover { background: #3b82f6; }
+        button:disabled {
+            background: #374151;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+        button.buy-btn { background: #059669; }
+        button.buy-btn:hover { background: #10b981; }
+
+        .price-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .price-control input {
+            width: 65px;
+            padding: 4px 6px;
+            text-align: center;
+            background: #242736;
+            border: 1px solid #3a3d4a;
+            color: #e0e0e0;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .price-control button {
+            padding: 4px 8px;
+            min-width: 28px;
+        }
+
+        .stat { color: #a0a0b0; font-size: 0.85em; }
+        .stat-value { color: #e0e0e0; font-weight: 600; }
+        .revenue { color: #4ade80; }
+        .demand-info { color: #fbbf24; font-size: 0.85em; }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .badge-active { background: #064e3b; color: #34d399; }
+        .badge-inactive { background: #1e1e2e; color: #6b7280; }
+
+        .game-over-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .game-over-overlay.show { display: flex; }
+        .game-over-box {
+            background: #1a1d27;
+            border: 2px solid #7eb8ff;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+        }
+        .game-over-box h2 { font-size: 2em; color: #7eb8ff; margin-bottom: 10px; }
+        .game-over-box .final-cash { font-size: 2.5em; color: #4ade80; margin: 20px 0; }
+        .game-over-box button { font-size: 1.1em; padding: 10px 30px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <!-- Header bar -->
+    <div class="header">
+        <h1>BizSim</h1>
+        <div class="date" id="game-date">Loading...</div>
+        <div class="cash">$<span id="cash">0</span></div>
+    </div>
+
+    <div class="grid">
+
+        <!-- Factories & Products -->
+        <div class="card grid-full">
+            <h2>Factories & Products</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Throughput</th>
+                        <th>Efficiency</th>
+                        <th>Capacity</th>
+                        <th>Inventory</th>
+                        <th>Price</th>
+                        <th>Demand / Sold</th>
+                        <th>Revenue/day</th>
+                        <th>Upgrades</th>
+                    </tr>
+                </thead>
+                <tbody id="products-table"></tbody>
+            </table>
+        </div>
+
+        <!-- Components -->
+        <div class="card">
+            <h2>Components</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Price</th>
+                        <th>Inventory</th>
+                        <th>Purchase</th>
+                        <th>Auto-Buy</th>
+                    </tr>
+                </thead>
+                <tbody id="components-table"></tbody>
+            </table>
+        </div>
+
+        <!-- Bill of Materials -->
+        <div class="card">
+            <h2>Bill of Materials <span class="stat">(adjusted for efficiency)</span></h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Comp</th>
+                        <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th>
+                    </tr>
+                </thead>
+                <tbody id="bom-table"></tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- Game Over overlay -->
+    <div class="game-over-overlay" id="game-over">
+        <div class="game-over-box">
+            <h2>Game Over</h2>
+            <p class="stat">Final Cash Balance</p>
+            <div class="final-cash">$<span id="final-cash">0</span></div>
+            <form method="POST" action="/action/new_game">
+                <button type="submit">New Game</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Poll the API every second for state updates
+        function formatNumber(n) {
+            return n.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        }
+        function formatCash(n) {
+            return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
+        function updateUI(data) {
+            // Header
+            document.getElementById('cash').textContent = formatCash(data.cash);
+            document.getElementById('game-date').textContent = data.game_date;
+
+            // Game over check
+            if (data.game_over) {
+                document.getElementById('game-over').classList.add('show');
+                document.getElementById('final-cash').textContent = formatCash(data.cash);
+                return;
+            }
+
+            // Products table
+            let prodHTML = '';
+            for (const [pid, p] of Object.entries(data.products)) {
+                const sold = p.last_sold !== undefined ? p.last_sold : 0;
+                const demand = p.last_demand !== undefined ? Math.round(p.last_demand) : 0;
+                const rev = p.last_revenue !== undefined ? p.last_revenue : 0;
+
+                prodHTML += `<tr>
+                    <td><strong>${pid}</strong></td>
+                    <td>${p.throughput_level}</td>
+                    <td>${p.efficiency_level}</td>
+                    <td>${p.capacity}/day</td>
+                    <td>${formatNumber(p.inventory)}</td>
+                    <td>
+                        <div class="price-control">
+                            <form method="POST" action="/action/set_price" style="display:flex;gap:4px;align-items:center;">
+                                <input type="hidden" name="product_id" value="${pid}">
+                                <button type="submit" onclick="this.form.price.value=(parseFloat(this.form.price.value)-0.5).toFixed(2);return true">-</button>
+                                <input type="number" name="price" value="${p.price.toFixed(2)}" step="0.1" min="0">
+                                <button type="submit" onclick="this.form.price.value=(parseFloat(this.form.price.value)+0.5).toFixed(2);return true">+</button>
+                            </form>
+                        </div>
+                    </td>
+                    <td class="demand-info">${demand} / ${sold}</td>
+                    <td class="revenue">$${formatCash(rev)}</td>
+                    <td>
+                        <form method="POST" action="/action/upgrade_throughput" style="display:inline">
+                            <input type="hidden" name="product_id" value="${pid}">
+                            <button type="submit" ${data.cash < p.throughput_upgrade_cost ? 'disabled' : ''}>
+                                T+1 $${formatNumber(p.throughput_upgrade_cost)}
+                            </button>
+                        </form>
+                        <form method="POST" action="/action/upgrade_efficiency" style="display:inline">
+                            <input type="hidden" name="product_id" value="${pid}">
+                            <button type="submit" ${data.cash < p.efficiency_upgrade_cost ? 'disabled' : ''}>
+                                E+1 $${formatNumber(p.efficiency_upgrade_cost)}
+                            </button>
+                        </form>
+                    </td>
+                </tr>`;
+            }
+            document.getElementById('products-table').innerHTML = prodHTML;
+
+            // Components table
+            let compHTML = '';
+            for (const [cid, c] of Object.entries(data.components)) {
+                const autoLabel = c.auto_purchase_unlocked
+                    ? '<span class="badge badge-active">Active</span>'
+                    : `<form method="POST" action="/action/unlock_auto_purchase" style="display:inline">
+                        <input type="hidden" name="component_id" value="${cid}">
+                        <button type="submit" ${data.cash < data.auto_purchase_unlock_cost ? 'disabled' : ''}>
+                            Hire $${formatNumber(data.auto_purchase_unlock_cost)}
+                        </button>
+                       </form>`;
+
+                compHTML += `<tr>
+                    <td>${cid}</td>
+                    <td>$${c.price.toFixed(2)}</td>
+                    <td>${formatNumber(Math.floor(c.inventory))}</td>
+                    <td>
+                        <form method="POST" action="/action/purchase_component" style="display:inline">
+                            <input type="hidden" name="component_id" value="${cid}">
+                            <button class="buy-btn" type="submit" name="quantity" value="10">10</button>
+                            <button class="buy-btn" type="submit" name="quantity" value="100">100</button>
+                            <button class="buy-btn" type="submit" name="quantity" value="1000">1k</button>
+                        </form>
+                    </td>
+                    <td>${autoLabel}</td>
+                </tr>`;
+            }
+            document.getElementById('components-table').innerHTML = compHTML;
+
+            // BOM table
+            let bomHTML = '';
+            const products = ['A', 'B', 'C', 'D', 'E'];
+            for (let cid = 1; cid <= 5; cid++) {
+                bomHTML += `<tr><td>${cid}</td>`;
+                for (const pid of products) {
+                    const val = data.bom[pid][String(cid)];
+                    bomHTML += `<td>${val !== null ? val : '-'}</td>`;
+                }
+                bomHTML += '</tr>';
+            }
+            document.getElementById('bom-table').innerHTML = bomHTML;
+        }
+
+        // Poll every second
+        async function poll() {
+            try {
+                const resp = await fetch('/api/state');
+                const data = await resp.json();
+                updateUI(data);
+            } catch (e) {
+                console.error('Poll failed:', e);
+            }
+        }
+
+        setInterval(poll, 1000);
+        poll(); // initial load
+    </script>
+</body>
+</html>
