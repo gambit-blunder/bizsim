@@ -25,9 +25,18 @@ from engine.clock import format_date
 from engine import config
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+import os
+
+LOG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_FILE = os.path.join(LOG_DIR, "bizsim.log")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),                          # console output
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),  # persistent file
+    ],
 )
 logger = logging.getLogger("bizsim.server")
 
